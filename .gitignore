@@ -1,0 +1,30 @@
+# Patient data (PHI / not for public release)
+Data/
+
+# Local Claude Code working directory
+.claude/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+**/.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Working / scratch files
+_patch_notebook.py
+*.tmp
+*.bak
