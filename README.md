@@ -1,118 +1,128 @@
 # CSU MRI Iron Nanoparticle Radiomics Study
 
-Canine head-and-neck lymph node characterisation with **post-ferumoxytol** MRI and PyRadiomics features.
+Canine head-and-neck lymph node characterisation with **multi-sequence MRI** and PyRadiomics features.
 
-> **One-line summary:** Across 12 dogs / 73 lymph nodes, post-iron MRI radiomics provide *modest* and *not-yet-statistically-credible* discrimination of metastatic from normal nodes (Random-Forest LODO-CV AUC = 0.574, permutation p = 0.184). Subjective radiologist read remains the strongest classifier (kappa = 0.620).
+**Authors:** Christopher J. Pinard, Tyler J. Poore, Aleena Shabbir, Nolan Chai, Markus Gruendler,
+Kuan-Chuen Wu, and Lynn Griffin.
+
+> **One-line summary:** Across 29 dogs / 171 lymph nodes, a histology-trained radiomics model gives
+> *modest and not-yet-statistically-credible* discrimination of metastatic from normal nodes
+> (best classifier Linear SVM, LODO-CV AUC = 0.62, 95% CI 0.38–0.87, permutation p ≈ 0.10). The
+> **subjective radiologist read remains the strongest classifier** (accuracy 90%, κ = 0.65; McNemar
+> p < 0.001 vs the model), and no reader+model combination beats it.
 
 ---
 
 ## Cohort
 
-| Cohort | Dogs | LNs | Histo M | Histo NM | PSIL? |
-|---|---|---|---|---|---|
-| Year 1 | 7, 8, 9, 10, 11, 12 | 37 | 17 | 20 | yes (5/6) |
-| Year 2 | 20-25 (Y2D1-Y2D6) | 36 | 3 | 33 | no |
-| **Total** | **12** | **73** | **20** | **53** | mixed |
+| Cohort | Dogs | Lymph nodes | Metastatic (M) | Sequences |
+|---|---|---|---|---|
+| Year 1 (D1–D12) | 12 | 74 | 18 | T1, T2, T1P, GE |
+| Year 2 (Y2 D1–D12) | 12 | 73 | 6 | T1, T2, T1P, GE (Y2 D12 no T1P) |
+| CRC model (CRC D2–D6) | 5 | 24 | 7 | T1, T2, T1P, GE |
+| **Total** | **29** | **171** | **31 (18.1%)** | 4 sequences |
 
-All MRI contours were drawn on the **post-ferumoxytol** acquisition. The 107 PyRadiomics features therefore describe each node *after* iron uptake. Functional macrophages in normal nodes phagocytose ferumoxytol, producing a marked T2*-weighted signal-intensity drop; metastatic nodes have impaired or displaced macrophage populations and retain higher signal. Histopathologically NM nodes are the ground-truth reference; M nodes are the class of clinical interest.
-
----
-
-## Aims
-
-1. **Aim 1** - Identify MRI radiomic features that distinguish histologically normal from metastatic regional lymph nodes.
-2. **Aim 2** - Correlate radiomic features with PSIL (post-injection signal-intensity loss; quantitative iron nanoparticle uptake). *Year 1 only - Year 2 lacks pre-iron acquisition.*
-3. **Aim 3** - Determine whether primary tumour radiomic features predict lymph node metastatic burden.
+Each lymph node is described by `original` PyRadiomics features from **four MRI sequences**
+(T1, T2, T1-post = `T1P`, gradient-echo = `GE`), concatenated into one ~428-feature vector. Labels are
+read from the *Summary* sheet of `patient_data_labels.xlsx`: `histo_M` (histopathology ground truth;
+Metastatic → 1, Normal/Reactive/Hyperplasia → 0) and `imaging_M` (the radiologist's subjective M/NM read).
+164 of 171 nodes carry a radiologist call; metastatic nodes sit in 11 of 29 dogs.
 
 ---
 
-## Methodology
+## Aims & current status
+
+1. **Aim 1** — Identify MRI radiomic features that distinguish histologically normal from metastatic
+   regional lymph nodes. — ✅ **Implemented** (classifier comparison + explainability).
+2. **Aim 2** — Correlate radiomic features with PSIL (post-injection signal-intensity loss; quantitative
+   iron nanoparticle uptake). — ⏳ **Not in current notebook.** PSIL is absent from the `FINAL_DATA`
+   label set; it was only ever measured for the original 5 Year-1 dogs (~30 nodes). Restorable for that
+   subset only.
+3. **Aim 3** — Determine whether primary tumour radiomic features predict lymph node metastatic burden.
+   — ⏳ **Not in current notebook.** Only 3 dogs (D7, D11, D12) have a primary-tumour contour in
+   `FINAL_DATA`; descriptive at best.
+
+---
+
+## Methodology (Aim 1)
 
 ### Validation
-- **Leave-One-Dog-Out Cross-Validation (LODO-CV)** - 12 folds for Aim 1, 5 folds for Aim 2.
-- **Correctness audit** - across all 12 folds, no dog and no row index appears in both train and held-out sets. **PASSED.**
-- **Within-fold pipeline:** median imputation -> variance threshold -> correlation filter (r > 0.95) -> standard scaling -> *(optional SMOTE)* -> classifier. All filters fit on training nodes only.
+- **Leave-One-Dog-Out Cross-Validation (LODO-CV)** — 29 folds; the *dog*, not the node, is the held-out
+  unit, and a leakage audit confirms no dog or row appears in both train and test.
+- **Within-fold pipeline (fit on training dogs only):** median imputation → near-zero-variance drop →
+  correlation filter (|r| > 0.95) → **univariate top-10 screen** (training-fold AUC vs `histo_M`) →
+  standardise → classifier, with the **decision threshold tuned by Youden's J** on the training fold.
 
-### Class-imbalance handling (Aim 1)
-Three training strategies compared head-to-head:
-- baseline,
-- `class_weight="balanced"` (inverse-frequency loss weights),
-- **SMOTE within fold** (synthetic minority oversampling on training set only - test data is never resampled).
+### Classifiers compared
+L1-penalised **Logistic Regression**, **Linear SVM**, **Random Forest**, and **XGBoost**, all made
+cost-sensitive (`class_weight='balanced'`; `scale_pos_weight` for XGBoost). SMOTE / random oversampling
+were tested and did not improve on class-weighting, so weighting is used throughout.
 
-### Statistical significance
-- **Permutation test (200 shuffles):** histopathology labels permuted, full LODO-CV pipeline re-run for each shuffle, observed AUC compared to the empirical null distribution.
+### Uncertainty & significance
+- **Dog-level (cluster) bootstrap 95% CIs** on every metric (dogs, not nodes, are resampled).
+- **Permutation test (200 shuffles)** — the entire selection+classification pipeline is re-run on shuffled
+  labels, so the null accounts for the optimism of in-fold feature selection.
 
 ---
 
 ## Headline Results
 
-### Aim 1 - NM vs M classification (12 dogs, 73 LNs)
+### Classifier comparison (LODO-CV)
 
-| Model | AUC | Sensitivity | Specificity |
-|---|---|---|---|
-| Logistic Regression | 0.234 | 10.0% | 81.1% |
-| Linear SVM | 0.273 | 10.0% | 81.1% |
-| **Random Forest** | **0.574** | 25.0% | 75.5% |
+| Classifier | AUC | 95% CI | Sensitivity | Specificity | Accuracy |
+|---|---|---|---|---|---|
+| **Linear SVM** (best) | **0.623** | [0.38, 0.87] | 41.9% | 84.3% | 76.6% |
+| Logistic (L1) | 0.592 | [0.35, 0.85] | 41.9% | 85.7% | 77.8% |
+| XGBoost | 0.590 | [0.37, 0.84] | 19.4% | 96.4% | 82.5% |
+| Random Forest | 0.588 | [0.34, 0.85] | 38.7% | 85.7% | 77.2% |
 
-Class-imbalance comparison (Random Forest):
+All four CIs span 0.5, and the best model's **permutation p ≈ 0.10 (not significant)** — the bottleneck is
+sample size (31 events, features ≫ samples), not the algorithm.
 
-| Strategy | AUC |
-|---|---|
-| Baseline | **0.574** |
-| Class-weighted (`balanced`) | 0.532 |
-| SMOTE within fold | 0.516 |
+### Explainability — what drives the predictions
 
-Class-weighting and SMOTE did **not** improve AUC, suggesting the bottleneck is radiomic signal-to-noise at the current sample size, not the imbalance per se.
+The reproducible signal is essentially **"big, bright, heterogeneous node"**: node short-axis **size**
+(`shape_LeastAxisLength`, selected in 28/29 folds) together with **large-area / large-dependence
+high-gray-level texture** (`glszm`/`gldm`, univariate AUC ≈ 0.79, FDR q < 0.001). Because size is exactly
+the cue the radiologist already uses, the model carries little *independent* information.
 
-**Permutation test:**
+### Radiologist vs model (164 nodes with a radiologist call)
 
-| | Value |
-|---|---|
-| Observed RF AUC | 0.574 |
-| Null mean | 0.476 |
-| Null 95th percentile | 0.638 |
-| **Empirical p-value** | **0.184** |
-
-The observed AUC lies **inside** the empirical null distribution. At n = 12 dogs / 73 LNs, radiomic models do not yet provide statistically credible discrimination under leave-one-dog-out validation.
-
-### Aim 2 - PSIL regression (Year 1 only, 30 LNs)
-
-All four regressors (Ridge, Lasso, SVR, Random Forest) had **negative R^2** under LODO-CV - none beat predicting the mean PSIL for every node. Zero univariate features survive Bonferroni correction across the 107 Spearman tests.
-
-### Aim 3 - Primary tumour vs LN metastatic burden (n = 4 dogs)
-
-Hypothesis-generating only. With four dogs (Dogs 7, 11, 12, Y2D3), the maximum achievable Spearman |r| is 1.0 by construction. Top features are first-order intensity statistics and GLCM/GLRLM textures, but no statistical conclusions can be drawn at this sample size.
-
-### Supplementary - Subjective MRI vs histopathology
-
-| Method | Sensitivity | Specificity | Accuracy | Cohen's kappa |
+| Reader | Sensitivity | Specificity | Accuracy | AUC |
 |---|---|---|---|---|
-| Subjective radiologist read | 60.0% | 96.2% | 86.3% | **0.620** |
-| PSIL threshold (Year 1 only) | 25.0% | 100% | 70.0% | - |
+| **Radiologist** (subjective MRI) | 0.724 | 0.933 | **0.896** | — |
+| Radiomics model (Linear SVM) | 0.379 | 0.837 | 0.756 | 0.601 |
 
-The radiologist read continues to outperform every radiomic model on the expanded cohort.
+McNemar p < 0.001 — the radiologist is significantly better. Reader+model combinations (OR / AND /
+logistic stack) **do not beat the radiologist alone**: the model recovers 0 of the 8 metastases the
+radiologist missed (shared false negatives); its only value is on the negative class (the AND rule raises
+specificity to 0.96).
 
 ---
 
 ## Key Limitations
 
-- **Sample size:** 12 dogs / 73 LNs - LODO-CV variance remains high; external validation is not yet possible.
-- **Dog-dominated variance:** PCA shows inter-dog variation exceeding class-related variation.
-- **Class imbalance:** 53 NM vs 20 M (73% NM) inflates accuracy/specificity.
-- **All-NM dogs (9, 11, 21, 22, 24, 25):** these six folds trivially inflate specificity and cannot be used to estimate per-dog sensitivity.
-- **Year 2 PSIL absent:** Aim 2 limited to Year 1 (30 LNs); adding post-iron acquisitions to Year 2 is the highest-yield improvement.
-- **Tumour heterogeneity:** cohort spans MCT, OMM, melanoma, FSA, STS, fibrosarcoma.
-- **Single MRI sequence:** post-ferumoxytol only; pre/post delta features and multi-parametric (T2*, DWI) sequences may improve discrimination.
+- **Severely under-powered (p ≫ n):** 31 metastatic events, 428 features (events-per-variable ≈ 0.07).
+  This is a **proof-of-concept**, not a validated model; CIs are wide by necessity.
+- **Cross-cohort batch effect:** raw MRI intensity differs ~5× across CRC / Year-1 / Year-2 (e.g. T1
+  first-order mean medians 2571 / 525 / 568). Intensity normalisation / ComBat is the highest-value fix.
+- **Small nodes:** 57/171 nodes < 500 mm³ (16 < 250 mm³); texture features unstable at that size.
+- **Label heterogeneity:** CRC histology (Hyperplasia/Reactive/Normal/Metastatic) collapsed to NM/M;
+  reactive/hyperplastic nodes enlarge and enhance — the natural false-positive trap for both readers.
+- **Outlier dogs:** D12 (occult-metastatic, 5/6 M missed by radiologist *and* model) and CRC D4 (6 of 31
+  positives in one dog) dominate the error and the positive class.
 
 ---
 
 ## Recommended Next Steps
 
-1. Extend Year 2 acquisitions to include post-ferumoxytol imaging so PSIL can be computed (would roughly double the Aim 2 sample).
-2. Continue cohort expansion toward >= 20 dogs to push Aim 1 LODO-CV beyond modest discrimination.
-3. Include multi-parametric sequences (T2*, DWI) in radiomic extraction.
-4. Harmonise MRI acquisition (or apply ComBat-style harmonisation post-hoc) to reduce inter-dog radiomic variance.
-5. Complete primary tumour segmentations for the remaining dogs (8, 9, 10, 20, 21, 23, 24, 25) for a meaningful Aim 3.
+1. **Harmonise intensities** (ComBat / per-image z-score) before re-extracting features.
+2. **Enrich the positive class** (more metastatic nodes / external cohort) toward credible discrimination.
+3. **Restore Aims 2 & 3** as the data allow: PSIL correlation for the 5 original Year-1 dogs, and a
+   descriptive primary-tumour vs nodal-burden analysis for D7/D11/D12 (completing more primary contours
+   would strengthen it).
+4. Robustness analyses: exclude < 250 mm³ nodes; exclude reactive/hyperplastic CRC nodes; D12 case study.
+5. Position radiomics as a **specificity aid** (AND-style confirmation), not a standalone replacement.
 
 ---
 
@@ -120,12 +130,12 @@ The radiologist read continues to outperform every radiomic model on the expande
 
 ```
 .
-|-- main.ipynb              # Primary analysis notebook (3 aims + audit + permutation test)
+|-- main.ipynb              # Primary analysis notebook (Aim 1: data, models, explainability, radiologist)
 |-- make_summary.py         # Builds study_summary.html from summary_figures/
 |-- study_summary.html      # Standalone HTML report (figures embedded as base64)
-|-- summary_figures/        # PNGs of every published figure
-|-- Results/                # Selected legacy figures + text dump from earlier runs
-`-- Data/                   # PyRadiomics CSVs + Patient summaries.xlsx (NOT pushed to GitHub)
+|-- summary_figures/        # fig1..fig7 PNGs exported from the notebook
+|-- Results/                # Selected legacy figures + text dumps from earlier runs
+`-- Data/                   # PyRadiomics CSVs + patient_data_labels.xlsx (NOT pushed to GitHub)
 ```
 
 The `Data/` folder contains protected patient information and is excluded via `.gitignore`.
@@ -134,18 +144,20 @@ The `Data/` folder contains protected patient information and is excluded via `.
 
 ## Reproducing
 
-Requirements: Python 3.11+, `pandas`, `scikit-learn>=1.5`, `imbalanced-learn`, `matplotlib`, `seaborn`, `scipy`, `openpyxl`.
+Requirements: Python 3.11+, `pandas`, `numpy`, `scikit-learn>=1.5`, `imbalanced-learn`, `xgboost`,
+`matplotlib`, `seaborn`, `scipy`, `openpyxl`.
 
 ```bash
 jupyter nbconvert --to notebook --execute main.ipynb --inplace
-python make_summary.py    # regenerates study_summary.html
+python make_summary.py    # regenerates study_summary.html from the exported figures
 ```
 
-PyRadiomics CSVs and the patient-summary spreadsheet must be present in `Data/`; obtain them from the study coordinators.
+PyRadiomics CSVs and `patient_data_labels.xlsx` must be present in `Data/FINAL_DATA/`; obtain them from
+the study coordinators.
 
 ---
 
 ## Citation / contact
 
-CSU Iron Nanoparticle (Ferumoxytol) Radiomics Study
-ANI-ML / Animl Health collaboration with Colorado State University.
+CSU Iron Nanoparticle (Ferumoxytol) Radiomics Study — Pinard CJ, Poore TJ, Shabbir A, Chai N,
+Gruendler M, Wu K-C, Griffin L. ANI-ML / Animl Health collaboration with Colorado State University.
