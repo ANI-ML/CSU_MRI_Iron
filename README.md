@@ -1,7 +1,5 @@
 # CSU MRI Iron Nanoparticle Radiomics Study
 
-Canine head-and-neck lymph node characterisation with **multi-sequence MRI** and PyRadiomics features.
-
 **Authors:** Christopher J. Pinard, Tyler J. Poore, Aleena Shabbir, Nolan Chai, Markus Gruendler,
 Kuan-Chuen Wu, and Lynn Griffin.
 
